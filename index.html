@@ -1,1 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TAO Compounding Calculator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-900 text-zinc-100 flex flex-col items-center py-10 min-h-screen">
+  <h1 class="text-3xl font-semibold text-center mb-1">Bittensor (TAO) Compounding Forecast</h1>
+  <p id="livePrice" class="text-sm text-zinc-400 mb-6 text-center">Loading live TAO price…</p>
+
+  <!-- TOP ROW: SIDEBAR + STATIC CAGR TABLE -->
+  <div class="w-full max-w-7xl flex flex-col md:flex-row gap-8 px-4">
+    <!-- Sidebar -->
+    <aside class="w-full md:max-w-xs bg-zinc-800 p-6 rounded-2xl shadow space-y-6">
+      <div><label class="block text-sm mb-1" for="stack">TAO Stack (TAO):</label><input id="stack" type="number" step="0.0001" placeholder="e.g. 12.5" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"/></div>
+      <div><label class="block text-sm mb-1" for="currency">Currency:</label><select id="currency" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"></select></div>
+      <div><label class="block text-sm mb-1" for="model">Select Model #:</label><select id="model" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"></select></div>
+      <div><label class="block text-sm mb-1" for="taoMode">TAO CAGR:</label><select id="taoMode" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"></select></div>
+      <div><label class="block text-sm mb-1" for="startYear">Withdrawal Starting Year:</label><select id="startYear" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"></select></div>
+      <div><label class="block text-sm mb-1" for="fixedW">Fixed Withdrawal?</label><select id="fixedW" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"><option>No</option><option>Yes</option></select></div>
+      <div><label class="block text-sm mb-1" for="wdModel">Withdrawal Model:</label><select id="wdModel" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"><option>Default</option><option>Custom</option></select></div>
+      <div id="customRange" class="hidden"><div class="flex gap-4"><div class="flex-1"><label class="block text-sm mb-1" for="maxPct">Max %</label><input id="maxPct" type="number" value="10" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"/></div><div class="flex-1"><label class="block text-sm mb-1" for="minPct">Min %</label><input id="minPct" type="number" value="3" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"/></div></div></div>
+      <div><label class="block text-sm mb-1" for="tax">Taxes Percentage:</label><input id="tax" type="number" step="0.1" value="0" class="w-full p-3 rounded bg-zinc-700 border border-zinc-600"/></div>
+      <button id="calcBtn" class="w-full py-3 rounded bg-orange-500 hover:bg-orange-600 font-medium">Calculate</button>
+    </aside>
+
+    <!-- Static CAGR table -->
+    <section id="cagrContainer" class="flex-1 overflow-x-auto"></section>
+  </div>
+
+  <!-- RESULTS -->
+  <section id="results" class="w-full max-w-7xl px-4 mt-10 hidden"></section>
+
+<script>
+const YEARS=30, baseYear=new Date().getFullYear();
+const SUPPORTED=["USD","AUD","EUR","GBP","CNY","IDR","JPY"];
+const MODELS=["1 – Aggressive CAGR","2 – Moderate CAGR","3 – Balanced CAGR","4 – Conservative CAGR","5 – Aggressive P-Law","6 – Default P-Law","7 – Conservative P-Law"];
+const TAO_MODES=["BTC Current","BTC ×2","Estimated TAO"];
+let SELECTED_CURRENCY='USD', priceMap={usd:360};
+const CAGRS={1:[45,43,42,41,40,39,38,37,36,35,34,33,32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15],2:[40,39,38,37,36,35,34,33,32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11],3:[35,34,33,32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6],4:[30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1],5:[48,45,42,39,36,33,30,27,24,21,19,17,15,13,12,11,10,9,8,7,6,5,4.5,4,3.5,3,2.5,2,1.5,1],6:[49,46,43,40,37,34,31,28,25,22,20,18,16,14,13,12,11,10,9,8,7,6,5.5,5,4.5,4,3.5,3,2.5,2],7:[50,50,45,40,35,32,29,26,23,20,18,16,14,12,11,10,9,8,7,6,5,4,3.5,3,2.5,2,1.5,1,0.5,0.25]};
+const TAO_EST=[250,230,210,190,170,150,135,120,108,97,87,78,70,63,57,51,46,41,37,33,30,27,24,22,20,18,16,15,14,13];
+
+// Populate dropdowns
+const currencySel=document.getElementById('currency');SUPPORTED.forEach(c=>currencySel.appendChild(new Option(c,c)));
+const modelSel=document.getElementById('model');MODELS.forEach((t,i)=>modelSel.appendChild(new Option(t,i+1)));
+const taoSel=document.getElementById('taoMode');TAO_MODES.forEach((t,i)=>taoSel.appendChild(new Option(t,["btc","btc2","tao"][i])));
+const yearSel=document.getElementById('startYear');for(let y=baseYear+1;y<=baseYear+YEARS;y++){yearSel.appendChild(new Option(y,y));}
+
+document.getElementById('wdModel').addEventListener('change',e=>document.getElementById('customRange').classList.toggle('hidden',e.target.value!=='Custom'));
+
+// Build static table
+function buildStatic(){const cont=document.getElementById('cagrContainer');let h='<table class="min-w-full text-xs"><thead><tr class="bg-zinc-700 text-zinc-200"><th class="px-3 py-1">Year</th>';for(let m=1;m<=7;m++){h+=`<th class="px-3 py-1 text-center">Model ${m}</th>`;}h+='</tr></thead><tbody>';for(let i=0;i<YEARS;i++){h+=`<tr class='${i%2?'bg-zinc-800':'bg-zinc-900'}'><td class="px-3 py-1">${baseYear+i+1}</td>`;for(let m=1;m<=7;m++){h+=`<td class="px-3 py-1 text-center">${CAGRS[m][i]}%</td>`;}h+='</tr>'; }cont.innerHTML=h+'</tbody></table>';}buildStatic();
+
+// Live price
+function fmt(v){return new Intl.NumberFormat('en-US',{style:'currency',currency:SELECTED_CURRENCY,maximumFractionDigits:0}).format(v);}function updatePrice(f){const cur=SELECTED_CURRENCY.toLowerCase();const val=priceMap[cur]??priceMap.usd;document.getElementById('livePrice').textContent=(f?'Fallback ':'Live ')+'TAO price: '+fmt(val);}fetch('https://api.coingecko.com/api/v3/simple/price?ids=bittensor&vs_currencies='+SUPPORTED.map(s=>s.toLowerCase()).join(',')) .then(r=>r.json()).then(d=>{priceMap=d.bittensor;updatePrice();}).catch(()=>updatePrice(true));currencySel.addEventListener('change',e=>{SELECTED_CURRENCY=e.target.value;updatePrice();});
+
+// Calculate
+const resultsSec=document.getElementById('results');
+document.getElementById('calcBtn').addEventListener('click',()=>{
+  const stack=parseFloat(document.getElementById('stack').value);if(!stack)return alert('Enter TAO stack');
+  let cagr=[...CAGRS[modelSel.value]];
+  if(taoSel.value==='btc2'){cagr=cagr.map(x=>x*2);}else if(taoSel.value==='tao'){cagr=[...TAO_EST];}
+  const start=parseInt(yearSel.value),max=parseFloat(document.getElementById('maxPct').value)||10,min=parseFloat(document.getElementById('minPct').value)||3,wdMode=document.getElementById('wdModel').value;
+  const p0=priceMap[SELECTED_CURRENCY.toLowerCase()]||priceMap.usd;
+  let pricePrev=p0,taoPrev=stack;const rows=[];
+  for(let i=0;i<YEARS;i++){const yr=baseYear+i+1;const price=pricePrev*(1+cagr[i]/100);const portRet=(price-pricePrev)*taoPrev;let wdPct=0;if(yr>=start){wdPct=(wdMode==='Default')?Math.max(3,10*Math.pow(0.94,yr-start)):Math.max(min,max*Math.pow(0.94,yr-start));}const wdUSD=price*taoPrev*wdPct/100;const taoSold=wdUSD/price;const taoRemain=taoPrev-taoSold;const remainUSD=taoRemain*price;rows.push({yr,cagr:cagr[i],price,wdPct,portRet,wdUSD,remainUSD,taoRemain,totalUSD:remainUSD});pricePrev=price;taoPrev=taoRemain;}
+  render(rows,stack*p0);
+});
+
+function render(data,startUSD){resultsSec.classList.remove('hidden');let h='<h2 class="text-lg font-semibold text-center mb-3">Results</h2><p class="text-center mb-4">Starting Principal Amount: <span class="font-semibold">'+fmt(startUSD)+'</span></p><div class="overflow-x-auto"><table class="min-w-full text-xs"><thead><tr class="bg-zinc-700 text-zinc-200"><th class="px-3 py-1">Year</th><th class="px-3 py-1">CAGR</th><th class="px-3 py-1">Modeled Price</th><th class="px-3 py-1">Withdrawal %</th><th class="px-3 py-1">Portfolio Return</th><th class="px-3 py-1">Withdrawal Amount</th><th class="px-3 py-1">Remaining Principal</th><th class="px-3 py-1">Remaining TAO</th><th class="px-3 py-1">Total Value</th></tr></thead><tbody>';data.forEach((r,i)=>{h+=`<tr class='${i%2?'bg-zinc-800':'bg-zinc-900'}'><td class="px-3 py-1">${r.yr}</td><td class="px-3 py-1">${r.cagr}%</td><td class="px-3 py-1">${fmt(r.price)}</td><td class="px-3 py-1">${r.wdPct.toFixed(1)}%</td><td class="px-3 py-1">${fmt(r.portRet)}</td><td class="px-3 py-1">${fmt(r.wdUSD)}</td><td class="px-3 py-1">${fmt(r.remainUSD)}</td><td class="px-3 py-1">${r.taoRemain.toFixed(6)}</td><td class="px-3 py-1">${fmt(r.totalUSD)}</td></tr>`});resultsSec.innerHTML=h+'</tbody></table></div>';}
+</script>
+</body>
+</html>
 
